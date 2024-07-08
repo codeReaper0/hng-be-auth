@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from .models import Organisation
 from .serializers import UserSerializer, RegisterSerializer, OrganisationSerializer
 from django.contrib.auth import authenticate
+from django.db.models import Q
 
 User = get_user_model()
 
@@ -70,22 +71,31 @@ class UserProfileView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated]
 
     def retrieve(self, request, *args, **kwargs):
-        # Fetch the user object based on the URL parameter
         user_id = self.kwargs['userId']
 
-        # Check if the user is querying their own profile or an accessible profile
-        if str(user_id) == str(request.user.userId):
-            user = request.user
-        else:
-            user = get_object_or_404(
-                User, id=user_id, organisations__users=request.user)
+        try:
+            # Check if the user is querying their own profile
+            if str(user_id) == str(request.user.userId):
+                user = request.user
+            else:
+                # Query to check if the user is in the same organization
+                user = User.objects.filter(
+                    Q(userId=user_id) & Q(organisations__users=request.user)
+                ).distinct().get()
 
-        serializer = self.get_serializer(user)
-        return Response({
-            "status": "success",
-            "message": "User profile fetched successfully",
-            "data": serializer.data
-        }, status=status.HTTP_200_OK)
+            serializer = self.get_serializer(user)
+            return Response({
+                "status": "success",
+                "message": "User profile fetched successfully",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            raise NotFound("User not found or not in the same organization.")
+        except Exception as e:
+            return Response({
+                "status": "error",
+                "message": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class OrganisationDetailView(generics.RetrieveAPIView):
